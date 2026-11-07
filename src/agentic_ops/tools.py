@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 
 @dataclass
@@ -47,3 +47,4 @@ def get_service_status(service: str) -> ServiceStatus:
             total_instances=0,
         ),
     )
+
