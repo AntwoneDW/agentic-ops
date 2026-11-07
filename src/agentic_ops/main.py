@@ -6,8 +6,7 @@ from openai import OpenAI
 from pydantic import BaseModel
 import json
 from dataclasses import asdict
-from agentic_ops.tools import get_service_status
-
+from agentic_ops.tools import get_service_logs, get_service_status
 
 load_dotenv()
 
@@ -90,6 +89,29 @@ service_status_tool = {
 }
 
 
+service_logs_tool = {
+    "type": "function",
+    "name": "get_service_logs",
+    "description": (
+        "Returns recent application log entries for a named service. "
+        "Use this when service health indicates degradation or additional "
+        "diagnostic evidence is needed."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "service": {
+                "type": "string",
+                "description": "The service whose recent logs should be inspected.",
+            },
+        },
+        "required": ["service"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+
 # Second exercise: give the model access to the tool contract and see
 # whether it decides that current service health should be queried.
 tool_response = client.responses.create(
@@ -112,82 +134,92 @@ tool_response = client.responses.create(
 # can actually be executed.
 tool_handlers = {
     "get_service_status": get_service_status,
+    "get_service_logs": get_service_logs,
 }
 
+available_tools = [
+    service_status_tool,
+    service_logs_tool,
+]
 
-# Preserve the model's output so the next model call has the complete
-# conversation state, including the function request it generated.
-next_input = list(tool_response.output)
+
+# The model's current working conversation.
+#
+# Each tool request and tool result is appended here so subsequent model
+# calls can reason over the complete investigation performed so far.
+agent_input = [
+    {
+        "role": "user",
+        "content": (
+            "Investigate the checkout service. Users are reporting HTTP 503 errors. "
+            "Use the available operational tools to gather enough evidence to "
+            "identify the likely cause."
+        ),
+    }
+]
+
+max_steps = 6
 
 
-for item in tool_response.output:
-    if item.type != "function_call":
-        continue
-
-    arguments = json.loads(item.arguments)
-
+for step in range(1, max_steps + 1):
     print()
-    print("MODEL REQUESTED TOOL")
-    print("tool:", item.name)
-    print("arguments:", arguments)
-    print("call id:", item.call_id)
+    print(f"--- AGENT STEP {step} ---")
 
-    # Resolve the requested tool through our explicit application registry.
-    # A model-generated tool name never directly becomes arbitrary code execution.
-    handler = tool_handlers.get(item.name)
-
-    if handler is None:
-        raise ValueError(f"Unsupported tool requested: {item.name}")
-
-    # Execute the real deterministic Python function.
-    result = handler(**arguments)
-
-    print()
-    print("APPLICATION EXECUTED TOOL")
-    print("result:", result)
-
-    # Return the tool result to the model in JSON form.
-    #
-    # call_id ties this result to the exact function request that produced it.
-    next_input.append(
-        {
-            "type": "function_call_output",
-            "call_id": item.call_id,
-            "output": json.dumps(asdict(result)),
-        }
+    response = client.responses.create(
+        model=model,
+        instructions=(
+            "You are the reasoning component of an AI operations system. "
+            "Use available tools to gather evidence before reaching conclusions. "
+            "Do not invent service state, logs, or operational facts."
+        ),
+        input=agent_input,
+        tools=available_tools,
+        parallel_tool_calls=False,
     )
 
+    # Preserve everything the model produced as part of workflow state.
+    agent_input.extend(response.output)
 
-# Give the model the observation produced by our application and allow it
-# to continue reasoning from the newly acquired evidence.
-final_response = client.responses.create(
-    model=model,
-    instructions=(
-        "You are the reasoning component of an AI operations system. "
-        "Investigate incidents using available operational tools rather than "
-        "inventing service state. Gather evidence before reaching conclusions."
-    ),
-    input=next_input,
-    tools=[service_status_tool],
-    parallel_tool_calls=False,
-)
+    function_calls = [
+        item
+        for item in response.output
+        if item.type == "function_call"
+    ]
 
-print()
-print("MODEL AFTER TOOL RESULT")
-print(final_response.output_text)
+    # No requested tools means the model has finished investigating.
+    if not function_calls:
+        print()
+        print("FINAL AGENT RESPONSE")
+        print(response.output_text)
+        break
 
-# Inspect the model response for a requested function call.
-# At this stage we are deliberately NOT executing the tool yet.
-# for item in tool_response.output:
-#     if item.type != "function_call":
-#         continue
-#
-#     arguments = json.loads(item.arguments)
-#
-#     print()
-#     print("MODEL REQUESTED TOOL")
-#     print("tool:", item.name)
-#     print("arguments:", arguments)
-#     print("call id:", item.call_id)
+    for item in function_calls:
+        arguments = json.loads(item.arguments)
 
-from dataclasses import asdict
+        print("MODEL REQUESTED TOOL")
+        print("tool:", item.name)
+        print("arguments:", arguments)
+
+        handler = tool_handlers.get(item.name)
+
+        if handler is None:
+            raise ValueError(f"Unsupported tool requested: {item.name}")
+
+        result = handler(**arguments)
+
+        print("APPLICATION EXECUTED TOOL")
+        print("result:", result)
+
+        # Return the deterministic tool observation to the model.
+        agent_input.append(
+            {
+                "type": "function_call_output",
+                "call_id": item.call_id,
+                "output": json.dumps(asdict(result)),
+            }
+        )
+
+else:
+    raise RuntimeError(
+        f"Agent exceeded maximum step limit of {max_steps}"
+    )

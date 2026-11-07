@@ -1,5 +1,7 @@
 from dataclasses import asdict, dataclass
 
+from dataclasses import dataclass
+
 
 @dataclass
 class ServiceStatus:
@@ -10,13 +12,19 @@ class ServiceStatus:
     total_instances: int
 
 
+@dataclass
+class ServiceLogs:
+    service: str
+    entries: list[str]
+
+
 def get_service_status(service: str) -> ServiceStatus:
     """
     Returns the current simulated health state for a service.
 
-    This local implementation keeps the operations layer deterministic.
-    It can later be replaced by a Kubernetes, cloud-platform, or
-    observability integration without changing the agent contract.
+    The deterministic implementation can later be replaced by a Kubernetes,
+    cloud-platform, or observability integration without changing the
+    model-facing tool contract.
     """
 
     simulated_services = {
@@ -36,7 +44,6 @@ def get_service_status(service: str) -> ServiceStatus:
         ),
     }
 
-    # Return a stable "unknown" state for services outside the simulation.
     return simulated_services.get(
         service,
         ServiceStatus(
@@ -48,3 +55,37 @@ def get_service_status(service: str) -> ServiceStatus:
         ),
     )
 
+
+def get_service_logs(service: str) -> ServiceLogs:
+    """
+    Returns recent simulated application log entries for a service.
+
+    Keeping the simulation deterministic gives the agent stable evidence
+    while the orchestration layer is being developed and tested.
+    """
+
+    simulated_logs = {
+        "checkout": ServiceLogs(
+            service="checkout",
+            entries=[
+                "ERROR Configuration provider failed to load PAYMENT_API_URL",
+                "ERROR Checkout initialization aborted due to missing configuration",
+                "WARN Readiness probe failed: application not ready",
+            ],
+        ),
+        "inventory": ServiceLogs(
+            service="inventory",
+            entries=[
+                "INFO Inventory service started successfully",
+                "INFO Readiness probe succeeded",
+            ],
+        ),
+    }
+
+    return simulated_logs.get(
+        service,
+        ServiceLogs(
+            service=service,
+            entries=["WARN No log data available for requested service"],
+        ),
+    )
