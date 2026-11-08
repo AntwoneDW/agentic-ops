@@ -1,7 +1,7 @@
 from dataclasses import asdict, dataclass
 
 from dataclasses import dataclass
-
+import json
 
 @dataclass
 class ServiceStatus:
@@ -89,3 +89,50 @@ def get_service_logs(service: str) -> ServiceLogs:
             entries=["WARN No log data available for requested service"],
         ),
     )
+
+# Describe an application capability that the model may request.
+#
+# This is only the tool contract. OpenAI does not receive or execute
+# our local Python implementation of get_service_status().
+service_status_tool = {
+    "type": "function",
+    "name": "get_service_status",
+    "description": (
+        "Returns the current health state of a named application service, "
+        "including HTTP status and healthy instance counts."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "service": {
+                "type": "string",
+                "description": "The service name, such as checkout or inventory.",
+            },
+        },
+        "required": ["service"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+service_logs_tool = {
+    "type": "function",
+    "name": "get_service_logs",
+    "description": (
+        "Returns recent application log entries for a named service. "
+        "Use this when service health indicates degradation or additional "
+        "diagnostic evidence is needed."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "service": {
+                "type": "string",
+                "description": "The service whose recent logs should be inspected.",
+            },
+        },
+        "required": ["service"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
