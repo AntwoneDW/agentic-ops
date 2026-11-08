@@ -5,8 +5,14 @@ from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_openai import OpenAIEmbeddings
 
 
-RUNBOOK_PATH = Path("../../data/runbooks/checkout.md")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+RUNBOOK_PATH = (
+    PROJECT_ROOT
+    / "data"
+    / "runbooks"
+    / "checkout.md"
+)
 
 def load_runbook_documents() -> list[Document]:
     """

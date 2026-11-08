@@ -9,9 +9,22 @@ from agentic_ops.tools import get_service_logs, get_service_status
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
+from agentic_ops.retrieval import search_runbook
 
 load_dotenv()
 
+@tool("search_runbook")
+def runbook_search_tool(query: str) -> str:
+    """
+    Search internal operational runbooks for service-specific troubleshooting
+    and remediation guidance.
+    """
+    documents = search_runbook(query, k=2)
+
+    return "\n\n".join(
+        document.page_content
+        for document in documents
+    )
 
 # LangChain derives the model-visible tool schema from the function's
 # type hints and docstring. The underlying operations remain deterministic.
@@ -34,6 +47,7 @@ def service_logs_tool(service: str) -> dict:
 available_tools = [
     service_status_tool,
     service_logs_tool,
+    search_runbook
 ]
 
 
@@ -50,12 +64,17 @@ model = ChatOpenAI(
 model_with_tools = model.bind_tools(available_tools)
 
 
+# SYSTEM_PROMPT = (
+#     "You are the reasoning component of an AI operations system. "
+#     "Use available operational tools to gather evidence before reaching conclusions. "
+#     "Do not invent service state, logs, or operational facts."
+# )
 SYSTEM_PROMPT = (
     "You are the reasoning component of an AI operations system. "
     "Use available operational tools to gather evidence before reaching conclusions. "
+    "Consult internal runbooks before recommending remediation. "
     "Do not invent service state, logs, or operational facts."
 )
-
 
 def call_model(state: MessagesState) -> dict:
     """
